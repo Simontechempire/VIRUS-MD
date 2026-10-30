@@ -1,113 +1,44 @@
 const fs=require('fs'),path=require('path')
 const {useMultiFileAuthState}=require('@whiskeysockets/baileys')
 
-/**
- * VIRUS MD - Multi Device Session Manager ULTRA
- * Owner: 404 error +2348102350169
- * Features: Multi-device unlimited, auto-delete disconnected, no delay
- */
+const BASE=path.join(__dirname,'session')
+if(!fs.existsSync(BASE)) fs.mkdirSync(BASE,{recursive:true})
 
 async function getSession(number){
 let clean=String(number).replace(/[^0-9]/g,'')
-let dir=path.join(__dirname,'session',clean)
-
-try{
+let dir=path.join(BASE,clean)
 if(!fs.existsSync(dir)) fs.mkdirSync(dir,{recursive:true})
 
-// Fix corrupted creds.json = cause of Waiting msg & pairing delay
+// Auto-fix corrupted creds.json - main cause of Connection Close + Waiting for this message
 let credsPath=path.join(dir,'creds.json')
 if(fs.existsSync(credsPath)){
-try{
-let data=fs.readFileSync(credsPath,'utf8')
-JSON.parse(data)
-}catch{
-console.log(`[VIRUS MD] ⚠️ Corrupted session ${clean} - auto deleting...`)
-fs.rmSync(dir,{recursive:true,force:true})
+try{JSON.parse(fs.readFileSync(credsPath,'utf8'))}catch{
+console.log('[FIX] Corrupted '+clean+' - deleting')
+try{fs.rmSync(dir,{recursive:true,force:true})}catch{}
 fs.mkdirSync(dir,{recursive:true})
 }
 }
-
 let {state,saveCreds}=await useMultiFileAuthState(dir)
-return {state,saveCreds,dir}
-
-}catch(e){
-console.log(`[SESSION ERROR] ${clean}: ${e.message}`)
-try{
-if(fs.existsSync(dir)) fs.rmSync(dir,{recursive:true,force:true})
-fs.mkdirSync(dir,{recursive:true})
-let {state,saveCreds}=await useMultiFileAuthState(dir)
-return {state,saveCreds,dir}
-}catch(err){
-throw err
-}
-}
+return {state,saveCreds}
 }
 
 function listSessions(){
-let base=path.join(__dirname,'session')
-if(!fs.existsSync(base)){
-fs.mkdirSync(base,{recursive:true})
-return []
-}
+if(!fs.existsSync(BASE)) return []
+return fs.readdirSync(BASE).filter(f=>{
 try{
-return fs.readdirSync(base).filter(f=>{
-let full=path.join(base,f)
-try{
-return /^\d{8,15}$/.test(f) && fs.statSync(full).isDirectory() && fs.existsSync(path.join(full,'creds.json'))
+let p=path.join(BASE,f)
+return /^\d+$/.test(f) && fs.statSync(p).isDirectory() && fs.existsSync(path.join(p,'creds.json'))
 }catch{return false}
 })
-}catch{
-return []
-}
 }
 
 function delSession(number){
-try{
 let clean=String(number).replace(/[^0-9]/g,'')
-let dir=path.join(__dirname,'session',clean)
+let dir=path.join(BASE,clean)
 if(fs.existsSync(dir)){
-fs.rmSync(dir,{recursive:true,force:true})
-console.log(`[VIRUS MD] ✓ AUTO-DELETED DISCONNECTED: ${clean}`)
-return true
+try{fs.rmSync(dir,{recursive:true,force:true});console.log('[DELETED] '+clean);return true}catch(e){return false}
 }
-console.log(`[VIRUS MD] Session ${clean} not found`)
-return false
-}catch(e){
-console.log(`[DELETE ERROR] ${e.message}`)
 return false
 }
-}
 
-function clearAllSessions(exceptMain=null){
-let sessions=listSessions()
-let deleted=0
-let mainClean=exceptMain?String(exceptMain).replace(/[^0-9]/g,''):null
-sessions.forEach(s=>{
-if(mainClean && s===mainClean) return
-if(delSession(s)) deleted++
-})
-console.log(`[VIRUS MD] Cleared ${deleted} sessions`)
-return deleted
-}
-
-function sessionExists(number){
-let clean=String(number).replace(/[^0-9]/g,'')
-let dir=path.join(__dirname,'session',clean)
-return fs.existsSync(path.join(dir,'creds.json'))
-}
-
-function getSessionInfo(number){
-let clean=String(number).replace(/[^0-9]/g,'')
-let dir=path.join(__dirname,'session',clean)
-let credsPath=path.join(dir,'creds.json')
-if(!fs.existsSync(dir)) return {exists:false,connected:false,number:clean}
-if(!fs.existsSync(credsPath)) return {exists:true,connected:false,empty:true,number:clean}
-try{
-let creds=JSON.parse(fs.readFileSync(credsPath,'utf8'))
-return {exists:true,connected:!!creds.registered,number:clean,path:dir,registered:!!creds.registered}
-}catch{
-return {exists:true,connected:false,corrupted:true,number:clean}
-}
-}
-
-module.exports={getSession,listSessions,delSession,clearAllSessions,sessionExists,getSessionInfo}
+module.exports={getSession,listSessions,delSession}
