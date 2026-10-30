@@ -3,17 +3,21 @@
   "version": "2.0.0",
   "main": "index.js",
   "type": "commonjs",
+  "engines": {
+    "node": "20.x"
+  },
   "scripts": {
     "start": "node index.js"
   },
   "dependencies": {
-    "@whiskeysockets/baileys": "^6.7.8",
-    "pino": "^9.0.0",
+    "@whiskeysockets/baileys": "6.7.8",
+    "pino": "8.17.2",
     "express": "^4.18.2",
     "qrcode-terminal": "^0.12.0",
     "axios": "^1.6.7",
-    "file-type": "^18.5.0",
+    "file-type": "16.5.4",
     "moment-timezone": "^0.5.45",
-    "dotenv": "^16.3.1"
+    "dotenv": "^16.3.1",
+    "jimp": "^0.22.10"
   }
 }
