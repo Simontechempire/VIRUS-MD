@@ -1,0 +1,19 @@
+{
+  "name": "virus-md",
+  "version": "2.0.0",
+  "main": "index.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "@whiskeysockets/baileys": "^6.7.8",
+    "pino": "^9.0.0",
+    "express": "^4.18.2",
+    "qrcode-terminal": "^0.12.0",
+    "axios": "^1.6.7",
+    "file-type": "^18.5.0",
+    "moment-timezone": "^0.5.45",
+    "dotenv": "^16.3.1"
+  }
+}
