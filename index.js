@@ -1,6 +1,6 @@
 require('dotenv').config()
 const express=require('express')
-const {default:makeWASocket,useMultiFileAuthState,DisconnectReason,Browsers,makeCacheableSignalKeyStore,downloadMediaMessage}=require('@whiskeysockets/baileys')
+const {default:makeWASocket,useMultiFileAuthState,DisconnectReason,Browsers,makeCacheableSignalKeyStore,downloadMediaMessage,fetchLatestBaileysVersion}=require('@whiskeysockets/baileys')
 const pino=require('pino'),fs=require('fs'),path=require('path'),axios=require('axios')
 const config=require('./config')
 const {runtime,norm}=require('./lib/func')
@@ -19,44 +19,89 @@ const saveSet=()=>fs.writeFileSync('./settings.json',JSON.stringify(SETTINGS,nul
 const fancyMap={a:'\u1D00',b:'\u0299',c:'\u1D04',d:'\u1D05',e:'\u1D07',f:'\uA730',g:'\u0262',h:'\u029C',i:'\u026A',j:'\u1D0A',k:'\u1D0B',l:'\u029F',m:'\u1D0D',n:'\u0274',o:'\u1D0F',p:'\u1D18',q:'\u01EB',r:'\u0280',s:'\uA731',t:'\u1D1B',u:'\u1D1C',v:'\u1D20',w:'\u1D21',x:'x',y:'\u028F',z:'\u1D22',A:'\u1D00',B:'\u0299',C:'\u1D04',D:'\u1D05',E:'\u1D07',F:'\uA730',G:'\u0262',H:'\u029C',I:'\u026A',J:'\u1D0A',K:'\u1D0B',L:'\u029F',M:'\u1D0D',N:'\u0274',O:'\u1D0F',P:'\u1D18',Q:'\u01EB',R:'\u0280',S:'\uA731',T:'\u1D1B',U:'\u1D1C',V:'\u1D20',W:'\u1D21',X:'x',Y:'\u028F',Z:'\u1D22'}
 const fancy=t=>String(t||'').split('').map(c=>fancyMap[c]||fancyMap[c.toLowerCase()]||c).join('')
 
+// FIX 1: TRACK ACTIVE SOCKETS TO PREVENT CONNECTION CLOSE
+let activeSocks=new Map()
+
 app.get('/pair',async(req,res)=>{
 let number=(req.query.number||'').replace(/[^0-9]/g,'')
 if(!number)return res.json({error:'?number=234... required'})
-if(listSessions().includes(number)){
-try{let {state}=await getSession(number);if(state.creds.registered)return res.json({error:'+'+number+' already paired! Delete first'})}catch{}
+
+// FIX 2: IF NUMBER IS RUNNING, CLOSE IT FIRST
+if(activeSocks.has(number)){
+try{activeSocks.get(number).ws.close()}catch{}
+activeSocks.delete(number)
+await new Promise(r=>setTimeout(r,3000))
 }
+
 try{
 let {state,saveCreds}=await getSession(number)
-let sock=makeWASocket({logger:pino({level:'silent'}),auth:state,browser:Browsers.macOS('Chrome'),printQRInTerminal:false,syncFullHistory:false})
+let {version}=await fetchLatestBaileysVersion()
+let sock=makeWASocket({
+logger:pino({level:'silent'}),
+auth:{creds:state.creds,keys:makeCacheableSignalKeyStore(state.keys,pino({level:'silent'}))},
+browser:Browsers.macOS('Chrome'),
+version,
+printQRInTerminal:false,
+syncFullHistory:false,
+connectTimeoutMs:60000
+})
 sock.ev.on('creds.update',saveCreds)
+
 if(!state.creds.registered){
-try{let code=await sock.requestPairingCode(number);res.json({code})}catch(e){res.json({error:e.message.includes('closed')?'Connection Closed - Wait 20 sec':e.message})}
-setTimeout(()=>{try{sock.ws.close()}catch{}},8000)
-}else{res.json({error:'Already paired'});try{sock.ws.close()}catch{}}
+await new Promise(r=>setTimeout(r,3000)) // FIX 3: WAIT BEFORE PAIR CODE
+try{
+let code=await sock.requestPairingCode(number)
+res.json({code})
+}catch(e){
+console.log('[PAIR ERROR]',e.message)
+res.json({error:e.message.includes('closed')?'Connection Closed - Delete Active Session, wait 60sec and retry':e.message})
+}
+setTimeout(()=>{try{sock.ws.close()}catch{}},25000)
+}else{
+res.json({error:'Already paired'})
+try{sock.ws.close()}catch{}
+}
 }catch(e){res.json({error:e.message})}
 })
+
 app.get('/sessions',(req,res)=>{let l=listSessions();res.json({count:l.length,sessions:l})})
-app.get('/delete-session',(req,res)=>{let n=(req.query.number||'').replace(/[^0-9]/g,'');delSession(n);res.json({deleted:n})})
+app.get('/delete-session',(req,res)=>{
+let n=(req.query.number||'').replace(/[^0-9]/g,'')
+if(activeSocks.has(n)){try{activeSocks.get(n).ws.close()}catch{} activeSocks.delete(n)}
+delSession(n)
+res.json({deleted:n})
+})
 app.get('/',(req,res)=>res.sendFile(path.join(__dirname,'public/index.html')))
 app.listen(PORT,()=>console.log('VIRUS MD running on '+PORT))
 
 async function startBot(number){
+if(activeSocks.has(number)) return // FIX 4: PREVENT DUPLICATE BOOT
 let {state,saveCreds}=await getSession(number)
+let {version}=await fetchLatestBaileysVersion()
 let sock=makeWASocket({
-logger:pino({level:'silent'}),auth:{creds:state.creds,keys:makeCacheableSignalKeyStore(state.keys,pino({level:'silent'}))},
-browser:Browsers.macOS('Chrome'),printQRInTerminal:false,syncFullHistory:false,markOnlineOnConnect:true,shouldSyncHistoryMessage:()=>false,
+logger:pino({level:'silent'}),
+auth:{creds:state.creds,keys:makeCacheableSignalKeyStore(state.keys,pino({level:'silent'}))},
+browser:Browsers.macOS('Chrome'),
+version,
+printQRInTerminal:false,
+syncFullHistory:false,
+markOnlineOnConnect:true,
+shouldSyncHistoryMessage:()=>false,
 getMessage:async()=>{return {conversation:'VIRUS MD'}}
 })
+activeSocks.set(number,sock)
 sock.ev.on('creds.update',saveCreds)
 sock.ev.on('connection.update',async(u)=>{
 let {connection,lastDisconnect}=u
 if(connection==='close'){
 let reason=lastDisconnect?.error?.output?.statusCode
+activeSocks.delete(number)
+console.log(`[DISCONNECT] ${number} reason: ${reason}`)
 if(reason===DisconnectReason.loggedOut){delSession(number)}
-else if(reason!==DisconnectReason.connectionReplaced){setTimeout(()=>startBot(number),3000)}
+else if(reason!==DisconnectReason.connectionReplaced){setTimeout(()=>startBot(number),8000)} // FIX 5: 8 SEC NOT 3
 }
 if(connection==='open'){
-console.log('CONNECTED: '+number)
+console.log(`CONNECTED: ${number}`)
 if(number===config.OWNER_NUMBER.replace(/[^0-9]/g,'')){
 try{await sock.sendMessage(sock.user.id,{image:{url:SETTINGS.thumb||config.BOT_PFP},caption:fancy('VIRUS MD CONNECTED\nOwner: '+config.OWNER_NAME+'\nPaired: '+listSessions().length)})}catch{}
 }
@@ -96,10 +141,9 @@ const replyPfp=async(t)=>{await sock.sendMessage(from,{image:{url:SETTINGS.thumb
 const done=async()=>{try{await sock.sendMessage(from,{react:{text:'💀',key:m.key}})}catch{}}
 const getQuoted=()=>m.message.extendedTextMessage?.contextInfo?.quotedMessage
 
-// ===== YOUR EXACT RAW MENU - ADDED - NO TOUCH - WITH PFP =====
+// ===== YOUR EXACT RAW MENU - WITH PFP - UNTOUCHED =====
 if(['menu','help'].includes(cmd)){
 let up=runtime(process.uptime())
-// THIS IS YOUR RAW MENU EXACTLY AS YOU SENT
 let rawMenu=`┌ ─ 〔 ᴠɪʀᴜꜱ ᴍᴅ 〕
 │ ᴄʀᴇᴀᴛᴏʀ ϟ ${config.OWNER_NAME}
 │ ɴᴜᴍʙᴇʀ ϟ ${config.OWNER_NUMBER}
@@ -313,7 +357,6 @@ await sock.sendMessage(from,{image:{url:SETTINGS.thumb||config.BOT_PFP},caption:
 await done();return
 }
 
-// REST OF YOUR COMMANDS - UNTOUCHED
 if(cmd==='owner'||cmd==='ownerinfo'){await replyPfp('Owner: '+config.OWNER_NAME+'\nNumber: '+config.OWNER_NUMBER+'\nBot: VIRUS MD\nMode: '+SETTINGS.mode+'\nPaired: '+listSessions().length);await done();return}
 if(cmd==='setowner'){if(!isOwner)return;let n=q.replace(/[^0-9]/g,'');SETTINGS.sudo.push(n);saveSet();await replyPfp('Added sudo: '+n);await done();return}
 if(cmd==='setprefix'){if(!isOwner)return;config.PREFIX=q;await replyPfp('Prefix: '+q);await done();return}
@@ -323,7 +366,7 @@ if(cmd==='setpp'||cmd==='setppbot'){if(!isOwner)return;let b=await downloadMedia
 if(cmd==='restart'){if(!isOwner)return;await replyPfp('Restarting...');await done();process.exit(0)}
 if(cmd==='public'){if(!isOwner)return;SETTINGS.mode='public';saveSet();await replyPfp('Mode Public');await done();return}
 if(cmd==='private'){if(!isOwner)return;SETTINGS.mode='private';saveSet();await replyPfp('Mode Private');await done();return}
-if(cmd==='clearsession'){if(!isOwner)return;let n=q.replace(/[^0-9]/g,'')||number;delSession(n);await replyPfp('Deleted: '+n);await done();return}
+if(cmd==='clearsession'){if(!isOwner)return;let n=q.replace(/[^0-9]/g,'')||number;if(activeSocks.has(n)){try{activeSocks.get(n).ws.close()}catch{} activeSocks.delete(n)} delSession(n);await replyPfp('Deleted: '+n);await done();return}
 if(cmd==='block'){if(!isOwner)return;let j=m.message.extendedTextMessage?.contextInfo?.mentionedJid?.[0]||q+'@s.whatsapp.net';await sock.updateBlockStatus(j,'block');await replyPfp('Blocked');await done();return}
 if(cmd==='unblock'){if(!isOwner)return;let j=m.message.extendedTextMessage?.contextInfo?.mentionedJid?.[0]||q+'@s.whatsapp.net';await sock.updateBlockStatus(j,'unblock');await replyPfp('Unblocked');await done();return}
 if(cmd==='grouplink'){let c=await sock.groupInviteCode(from);await replyPfp('https://chat.whatsapp.com/'+c);await done();return}
@@ -364,7 +407,7 @@ console.log('[VIRUS MD] Booting '+listSessions().length+' devices...')
 for(let n of listSessions()){
 console.log('[BOOT] '+n)
 try{await startBot(n)}catch(e){console.log('[BOOT FAIL] '+n+': '+e.message)}
-await new Promise(r=>setTimeout(r,2500))
+await new Promise(r=>setTimeout(r,6000))
 }
 if(!listSessions().includes(main)){
 try{await startBot(main)}catch{}
