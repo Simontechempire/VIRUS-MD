@@ -1,2 +1,1 @@
-# VIRUS-MD
-Advanced Whatsapp bot 
+VIRUS MD - Multi Device by 404 error (2348102350169). 200+ real commands in Gods Zeal XMD style. Features: public pair site (/), 8-digit code linking (no QR), auto-read/typing/online/recording, antilink/antidelete/antispam, group management, sticker converters, YT/TikTok/IG/FB/Mediafire downloaders, viewonce recovery, owner tools & broadcast. Deploy on Render free: Build npm install, Start npm start, Env PORT=10000. Fast, secure, multi-session support. Pair anyone, anytime, anywhere.
